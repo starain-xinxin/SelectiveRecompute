@@ -10,7 +10,7 @@ class Timer:
         self.run_time = None         # 上一次的计时总时间
 
     def start(self):
-        if not self.is_start:
+        if self.is_start:
             logging.warning(f'there is a running timer killed -- Timer "{self.name}"')
         self.is_start = True
         self.start_time = time.time()
