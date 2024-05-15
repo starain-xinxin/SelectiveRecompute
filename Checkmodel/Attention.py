@@ -7,7 +7,8 @@ import Checkmodel as Cm
 
 class MultiHeadQKV(CheckModule, nn.Module):
     """ 用于QKV矩阵相乘,这里修改为一个head的类 """
-    def __init__(self, d_model, dim_k=None, dim_v=None, gradient_checkpoint=False):
+
+    def __init__(self, d_model, dim_k=None, dim_v=None, gradient_checkpoint=False ): 
         super().__init__()
         self.d_model = d_model
         self.num_head = 1
@@ -19,9 +20,9 @@ class MultiHeadQKV(CheckModule, nn.Module):
             dim_v = dim_k
         self.dim_v = dim_v
 
-        self.Wq = nn.Linear(self.d_model, self.num_heads*self.dim_q, bias=False)
-        self.Wk = nn.Linear(self.d_model, self.num_heads*self.dim_k, bias=False)
-        self.Wv = nn.Linear(self.d_model, self.num_heads*self.dim_v, bias=False)
+        self.Wq = nn.Linear(self.d_model, self.num_head*self.dim_q, bias=False)
+        self.Wk = nn.Linear(self.d_model, self.num_head*self.dim_k, bias=False)
+        self.Wv = nn.Linear(self.d_model, self.num_head*self.dim_v, bias=False)
 
         self.gradient_checkpoint = gradient_checkpoint
         self._data_shape = None
@@ -45,7 +46,7 @@ class MultiHeadQKV(CheckModule, nn.Module):
         matrix_Q = self.Wq(x)
         matrix_K = self.Wk(x)
         matrix_V = self.Wv(x)
-        Attn_Matrix = matrix_Q @ matrix_K.T
+        Attn_Matrix = matrix_Q @ torch.transpose(matrix_K, 1, 2)
         return matrix_V, Attn_Matrix
 
     def _compute_profit(self):
@@ -61,12 +62,13 @@ class MultiHeadQKV(CheckModule, nn.Module):
         mem_K_or_Q = data_shape * self.num_head * self.dim_k
         return 2 * mem_K_or_Q * dtype_bytes
 
+
 class AttentionCore(CheckModule, nn.Module):
     """ 计算 attn core """
     def __init__(self, dim_k, gradient_checkpoint=False):
         super().__init__()
         self.dim_k = dim_k
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=-1)
         self.gradient_checkpoint = gradient_checkpoint
         self._data_shape = None
         self._data_dtype = None
@@ -91,9 +93,10 @@ class AttentionCore(CheckModule, nn.Module):
         return x
 
     def _checkpoint_forward(self, matrix_V, Attn_Matrix, mask=None):
-        sqrt = torch.sqrt(torch.tensor([self.dim_k], requires_grad=True))
+        # todo:这里更改设备等
+        sqrt = torch.sqrt(torch.tensor([self.dim_k])).cuda()
         if mask is None:
-            mask = 0       # TODO:完善mask的默认值
+            mask = torch.tensor([0]).cuda()       # TODO:完善mask的默认值
         core = Attn_Matrix / sqrt + mask
         core = self.softmax(core)
         return core @ matrix_V
@@ -114,6 +117,7 @@ class AttentionCore(CheckModule, nn.Module):
         sqrt_mem = softmax_mem
         return softmax_mem + mask_mem + sqrt_mem
 
+
 class MultiAttention(Cm.CheckModule, nn.Module):
     """ 多头注意力机制 """
     def __init__(self,d_model, dim_k, dim_v, num_head=1, gradient_checkpoint=False):
@@ -126,18 +130,18 @@ class MultiAttention(Cm.CheckModule, nn.Module):
         self.dim_v = dim_v
         self.num_head = num_head
         self.d_model = d_model
-        self.QKVList = nn.ModuleList([MultiHeadQKV(self.d_model, dim_k=self.dim_k, dim_v=self.dim_v) for i in range(self.num_head)])
-        self.CoreList = nn.ModuleList([AttentionCore(self.dim_k) for i in range(self.num_head)])
+        self.QKVList = nn.ModuleList([MultiHeadQKV(self.d_model, dim_k=self.dim_k, dim_v=self.dim_v) for _ in range(self.num_head)])
+        self.CoreList = nn.ModuleList([AttentionCore(self.dim_k) for _ in range(self.num_head)])
         self.CatMatrix = nn.Linear(self.num_head * self.dim_k, self.d_model)
 
 
     def _checkpoint_forward(self, x, mask=None):
         Attn_core_list = []
         # 计算多个注意力头的结果，存入 Attn_core_list
-        for QKV_Key, Core_key in zip(self.QKVList.keys(), self.CoreList.keys()):
+        for idx in range(self.num_head):
             # matrix_V [batch, seq_len, dim_v]   Attn_Matrix [batch, seq_len, seq_len]
-            matrix_V, Attn_Matrix = self.QKVList[QKV_Key](x)
-            attn_core = self.CoreList[Core_key](matrix_V, Attn_Matrix, mask)
+            matrix_V, Attn_Matrix = self.QKVList[idx](x)
+            attn_core = self.CoreList[idx](matrix_V, Attn_Matrix, mask)
             Attn_core_list.append(attn_core)
         # concat 结果
         Attn_Core = torch.cat(Attn_core_list, dim=-1)   # tensor (batch, seq_len, heads*dim_v)
@@ -152,7 +156,9 @@ class MultiAttention(Cm.CheckModule, nn.Module):
             self._data_shape = list(x.size())
         if self._data_dtype is None:
             self._data_dtype = x.dtype
-
+        # TODO: 完善mask
+        if mask is None:
+            pass
         if self.gradient_checkpoint:
             x = Cp.checkpoint(self._checkpoint_forward, x, use_reentrant=False)
         else:
@@ -185,6 +191,7 @@ class MultiAttention(Cm.CheckModule, nn.Module):
         core_out_cost_Attn_Matrix = self.num_head * batch * seq_len * seq_len * dtype_bytes
         return sub_mem_cost + 2 * (core_out_cost_Attn_Matrix + core_out_cost_matrix_V)
 
+
 class CheckEncoder(Cm.TopCheckModule, nn.Module):
     """ Encoder 编码器 """
     def __init__(self, d_model, dim_k, dim_v, num_head=1, hidden_dim=None, activation_func='ReLU'):
@@ -204,10 +211,13 @@ class CheckEncoder(Cm.TopCheckModule, nn.Module):
         self.FFN = Cm.FNN(self.d_model, hidden_dim=self.hidden_dim, activation_func=self.activation_func)
         self.LN2 = Cm.LayerNormal(self.d_model)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
+        # TODO: 完善
+        if mask is None:
+            pass
         # attention 部分
         x1 = self.LN1(x)
-        x1 = self.MultiAttention(x1)
+        x1 = self.MultiAttention(x1, mask)
         x = x + x1
         # fnn部分
         x2 = self.LN2(x)
@@ -216,21 +226,40 @@ class CheckEncoder(Cm.TopCheckModule, nn.Module):
         return x
 
 
+class CheckBert(nn.Module):
+    def __init__(self, seq_len, d_model, dim_k, dim_v,  num_encoder, num_head=1, hidden_dim=None, activation_func='ReLU', num_class=20):
+        super().__init__()
+        self.d_model = d_model
+        self.dim_k = dim_k
+        self.dim_v = dim_v
+        self.num_head = num_head
+        if hidden_dim is None:
+            hidden_dim = d_model
+        self.hidden_dim = hidden_dim
+        self.activation_func = activation_func
+        self.num_encoder = num_encoder
+        self.num_class = num_class
+        self.seq_len = seq_len
 
+        self.encoders = nn.ModuleList([CheckEncoder(d_model, dim_k, dim_v, num_head, hidden_dim, activation_func)
+                                       for i in range(self.num_encoder)])
+        self.classMatrix1 = nn.Linear(self.d_model, 1)
+        self.classMatrix2 = nn.Linear(self.seq_len, self.num_class)
+        self.softmax = nn.Softmax(dim=-1)
 
+    def forward(self, x, mask=None):
+        # TODO: 完善mask
+        if mask is None:
+            pass
+        for sub_model in self.encoders:
+            x = sub_model(x, mask)
+        x = self.classMatrix1(x)            # [b, s, d_model]
+        x = x.reshape(-1, self.seq_len)     # [b, s]
+        x = self.classMatrix2(x)            # [b, class]
+        x = self.softmax(x)
+        return x
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    @staticmethod
+    def BertLoss(output, label):
+        loss_fn = nn.CrossEntropyLoss()
+        return loss_fn(output, label)
