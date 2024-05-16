@@ -1,5 +1,6 @@
 import torch
 import Checkmodel as Cm
+import Pretrain
 
 # 实验变量
 device = 'cuda:0'
@@ -9,8 +10,8 @@ seq_len = 1024
 d_model = 512
 dim_k = 512
 dim_v = 512
-num_encoder = 10
-num_head = 4
+num_encoder = 2
+num_head = 1
 hidden_dim = 2024
 activation_func = 'ReLU'
 num_class = 20
@@ -29,4 +30,13 @@ out = model(data)
 loss = model.BertLoss(out, label)
 loss.backward()
 
+# --------------- 4.构建 check model 森林 --------------- #
+# (1) 构建森林
+Check_forest = Pretrain.CheckForest(model)
+# (2) 计算 profit 和 cost
+Check_forest.make_profit_cost()
+# (3)
+
 print(out.size())
+print(f'{type(model).__name__}')
+print(model._modules['encoders']._modules['0']._modules['MultiAttention']._compute_profit())

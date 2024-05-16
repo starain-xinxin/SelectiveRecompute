@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 class CheckModule(nn.Module):
@@ -66,4 +65,5 @@ class TopCheckModule(nn.Module):
                 sub_model._set_sub_check_level()        # 让下一层继续这个操作
 
     def set_grad_checkpoint(self):
+        # TODO：这个函数是否考虑删除
         raise NotImplementedError

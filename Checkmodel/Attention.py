@@ -94,9 +94,9 @@ class AttentionCore(CheckModule, nn.Module):
 
     def _checkpoint_forward(self, matrix_V, Attn_Matrix, mask=None):
         # todo:这里更改设备等
-        sqrt = torch.sqrt(torch.tensor([self.dim_k])).cuda()
+        sqrt = torch.sqrt(torch.tensor([self.dim_k])).to(matrix_V.device)
         if mask is None:
-            mask = torch.tensor([0]).cuda()       # TODO:完善mask的默认值
+            mask = torch.tensor([0]).to(matrix_V.device)       # TODO:完善mask的默认值
         core = Attn_Matrix / sqrt + mask
         core = self.softmax(core)
         return core @ matrix_V
@@ -216,6 +216,8 @@ class CheckEncoder(Cm.TopCheckModule, nn.Module):
         if mask is None:
             pass
         # attention 部分
+        self.LN1.to(x.device)
+        self.LN2.to(x.device)
         x1 = self.LN1(x)
         x1 = self.MultiAttention(x1, mask)
         x = x + x1
