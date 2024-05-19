@@ -15,7 +15,7 @@ class MemoryMonitor:
     def start(self, max_entries=100000):
         self.is_start = True
         if self.is_snapshot:
-            torch.cuda.memory._record_memory_history(max_entries=max_entries)
+            torch.cuda.memory._record_memory_history(max_entries=max_entries, device=self.device)
         logging.info(f'start the memory monitor of "{self.name}"   device:{self.device}')
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device=self.device)
@@ -26,10 +26,10 @@ class MemoryMonitor:
             if self.is_snapshot:
                 torch.cuda.memory._dump_snapshot(self.save_filename)    # 保存数据
                 torch.cuda.memory._record_memory_history(enabled=None)  # 停掉记录，关闭snapshot
-            self.max_tensor_memory = torch.cuda.max_memory_allocated() / 1024 / 1024
+            self.max_tensor_memory = torch.cuda.max_memory_allocated(device=self.device) / 1024 / 1024
             logging.info(f'张量占用最大显存：{self.max_tensor_memory}MB')
-            self.max_torch_cache = torch.cuda.max_memory_reserved() / 1024 / 1024
-            logging.info(f'峰值缓存：{torch.cuda.max_memory_reserved() / 1024 / 1024}MB')
+            self.max_torch_cache = torch.cuda.max_memory_reserved(device=self.device) / 1024 / 1024
+            logging.info(f'峰值缓存：{torch.cuda.max_memory_reserved(device=self.device) / 1024 / 1024}MB')
             logging.info(f'end the memory monitor of "{self.name}"')
         else:
             logging.error(f'MemoryMonitor "{self.name}": memory is not started')

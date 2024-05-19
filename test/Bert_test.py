@@ -35,7 +35,10 @@ loss.backward()
 Check_forest = Pretrain.CheckForest(model)
 # (2) 计算 profit 和 cost
 Check_forest.make_profit_cost()
-# (3)
+# (3) 测试 make_forest_type_check
+Pretrain.make_forest_type_check(Check_forest, gradient_checkpoint=False, model_type=Cm.MultiHeadQKV)
+Pretrain.make_forest_type_check(Check_forest, gradient_checkpoint=False, model_type='All')
+Pretrain.make_forest_type_check(Check_forest, gradient_checkpoint=True, model_type='All')
 
 print(out.size())
 print(f'{type(model).__name__}')

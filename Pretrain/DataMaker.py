@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader, Dataset
 class DataMaker(Dataset):
     """ 随机数据类 """
 
-    def __init__(self, batch_size=10, seq_len=1024, d_model=512, num_class=20):
-        rand_data = torch.randn(100*batch_size, seq_len, d_model)
-        rand_labels = torch.randint(low=0, high=num_class, size=(100*batch_size,))
+    def __init__(self, batch_size=10, seq_len=1024, d_model=512, num_class=20, iters=5):
+        rand_data = torch.randn(iters*batch_size, seq_len, d_model)
+        rand_labels = torch.randint(low=0, high=num_class, size=(iters*batch_size,))
         self.data = rand_data
         self.labels = rand_labels
         self.batch_size = batch_size
