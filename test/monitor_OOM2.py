@@ -6,8 +6,6 @@ import utils
 import torch.optim as optim
 from tqdm import tqdm
 logging.basicConfig(level=logging.INFO)
-# import os
-# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 # 实验变量
 # device = 'cuda:0'
@@ -23,22 +21,22 @@ logging.basicConfig(level=logging.INFO)
 # activation_func = 'ReLU'
 # num_class = 20
 
-# max_GPU_memory = 80
+# max_GPU_memory = 4
 # device0 = 'cuda:0'
 # device1 = 'cuda:1'
 # device2 = 'cuda:2'
-# iters = 20
+# iters = 5
 #
-# batch_size = 115
-# seq_len = 2048
+# batch_size = 10
+# seq_len = 1024
 # d_model = 512
-# num_encoder = 16
+# num_encoder = 8
 # num_head = 8
 # dim_k = int(d_model / num_head)
 # dim_v = int(d_model / num_head)
 # hidden_dim = 2 * d_model
 # activation_func = 'ReLU'
-# num_class = 10
+# num_class = 8
 
 max_GPU_memory = 80
 device0 = 'cuda:0'
@@ -46,18 +44,16 @@ device1 = 'cuda:1'
 device2 = 'cuda:2'
 iters = 20
 
-batch_size = 25
-seq_len = 1024
-d_model = 1024
-num_encoder = 40
-num_head = 20
-dim_k = int(d_model / 4)
-dim_v = int(d_model / 4)
+batch_size = 100
+seq_len = 2048
+d_model = 512
+num_encoder = 16
+num_head = 8
+dim_k = int(d_model / num_head)
+dim_v = int(d_model / num_head)
 hidden_dim = 2 * d_model
 activation_func = 'ReLU'
 num_class = 10
-
-tolerance = 0.6
 
 # --------------- 0.监控代码 --------------- #
 
@@ -70,38 +66,42 @@ data_maker = Pretrain.DataMaker(batch_size, seq_len, d_model, num_class, iters=i
 dataloader = DataLoader(data_maker, batch_size=batch_size, shuffle=True)
 
 # --------------- 3.launch --------------- #
-Pretrain.Pre_launch(model, dataloader, model.BertLoss, device=device1, tolerance=tolerance, max_GPU_memory=max_GPU_memory)
+Pretrain.Pre_launch(model, dataloader, model.BertLoss, device=device1, tolerance=0.70, max_GPU_memory=max_GPU_memory)
 
 # --------------- 4.train ---------------- #
 logging.info(f'---------------- Start Train -----------------------')
 
-mem_monitor = utils.MemoryMonitor(folder='/home/yuanxinyu/SelectiveRecompute/data/test', name='launch',
+mem_monitor = utils.MemoryMonitor(folder='/home/yuanxinyu/SelectiveRecompute/data/test', name='OOM2',
                                   device=device2, is_snapshot=True)
 mem_monitor.start()
 
 model.to(device2)
-forest = Pretrain.CheckForest(model)
 
-timer = utils.Timer('launch')
+timer = utils.Timer('OOM2')
 timer.start()
 
 ## train ##
-for batch_idx, (inputs, targets) in tqdm(enumerate(dataloader)):
-    inputs = inputs.to(device2)
-    targets = targets.to(device2)
-    out = model(inputs)
-    optimizer.zero_grad()
-    loss = model.BertLoss(out, targets)
-    loss.backward()
-    optimizer.step()
-## train ##
+try:
+    for batch_idx, (inputs, targets) in tqdm(enumerate(dataloader)):
+        inputs = inputs.to(device2)
+        targets = targets.to(device2)
+        out = model(inputs)
+        optimizer.zero_grad()
+        loss = model.BertLoss(out, targets)
+        loss.backward()
+        optimizer.step()
 
-timer.end()
-logging.info(f'总时间{timer.runtime()}')
-mem_monitor.end()
-max_tensor_memory = mem_monitor.max_tensor_memory
-logging.info(f'selective策略下，最大张量占用：{max_tensor_memory / 1024}GB')
-max_torch_memory = mem_monitor.max_torch_cache
-logging.info(f'selective策略下，最大张量占用：{max_torch_memory / 1024}GB')
+    ## train ##
+except RuntimeError as e:
+    print(e)
+    timer.end()
+    logging.info(f'总时间{timer.runtime()}')
+    mem_monitor.end()
+    max_tensor_memory = mem_monitor.max_tensor_memory
+    logging.info(f'selective策略下，最大张量占用：{max_tensor_memory / 1024}GB')
+    max_torch_memory = mem_monitor.max_torch_cache
+    logging.info(f'selective策略下，最大张量占用：{max_torch_memory / 1024}GB')
+
+
 
 

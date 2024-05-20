@@ -15,7 +15,8 @@ def Pre_launch(model: nn.Module, dataloader: DataLoader,
                optim_type:Union[str, None] = None,
                CheckPointFunc: Union[str, None] = None,
                device: Union[str, None] = None,
-               folder: Union[str, None] = None):
+               folder: Union[str, None] = None,
+               is_snapshot = False):
     """ 用于构造合适的 gradient—checkpoint 断点
     1. 在 cpu 上完成一个 iter 的前向
     2. 构建 model-forest，设置每个节点，计算每个节点的 profit 与 cost
@@ -32,6 +33,7 @@ def Pre_launch(model: nn.Module, dataloader: DataLoader,
     if folder is None:
         folder = '/home/yuanxinyu/SelectiveRecompute/data/test'
     ## ---- 1 ---------------------------------------------
+    logging.info(f'cpu-iter')
     if optim_type is None or optim_type == 'Adam':
         optimizer = optim.Adam(model.parameters(), lr=0.001)
     else :
@@ -49,6 +51,7 @@ def Pre_launch(model: nn.Module, dataloader: DataLoader,
     model_forest.make_profit_cost()
 
     ## ---- 3 ----------------------------------------------
+    logging.info(f'min-memory-select')
     min_memory_check_list = min_memory(model_forest)
     print('使用checkpoint的模型：')
     for node in min_memory_check_list:
@@ -56,7 +59,8 @@ def Pre_launch(model: nn.Module, dataloader: DataLoader,
 
     ## ---- 4 ----------------------------------------------
     # 初始化一个 memory monitor
-    min_memory_monitor = utils.MemoryMonitor(folder=folder, name='min-memory', device=device, is_snapshot=True)
+    logging.info(f'min-GPU-iter')
+    min_memory_monitor = utils.MemoryMonitor(folder=folder, name='min-memory', device=device, is_snapshot=is_snapshot)
     min_memory_monitor.start()
     # cuda 前向一个 iter
     if optim_type is None or optim_type == 'Adam':
@@ -88,6 +92,8 @@ def Pre_launch(model: nn.Module, dataloader: DataLoader,
     ## ---- 6 -----------------------------------------------
     free_memory_GB = free_memory/(1024**3)
     false_set = fill_up_memory(forest=model_forest, free_memory=free_memory_GB)
+    normalize_forest(model_forest)
+    print(f'不进行重计算的层:')
     for i in false_set:
         print(type(i.model))
 
@@ -181,6 +187,7 @@ def make_forest_type_check(forest: Pretrain.CheckForest, gradient_checkpoint: bo
                 assert 1, "node type error"
 
         make_node_type_check(tree, gradient_checkpoint, model_type)
+    return forest
 
 
 def forest_memory_cost(forest: Pretrain.CheckForest):
@@ -271,6 +278,9 @@ def fill_up_memory(forest: Pretrain.CheckForest, free_memory, methed: str = 'gre
         for node in select_node_list:
             false_set.add(node)
 
+    # 全部置为True
+    forest = make_forest_type_check(forest, True, 'All')
+
     # 递归处理 false_set
     temp_set = set([])
     for node in false_set:
@@ -280,12 +290,11 @@ def fill_up_memory(forest: Pretrain.CheckForest, free_memory, methed: str = 'gre
             if isinstance(father_node.model, Cm.CheckModule):
                 temp_set.add(father_node)
                 _father_set_recursion(father_node)
-
+        make_node_type_check1(node, False, 'All')
         _father_set_recursion(node)
     false_set = false_set | temp_set
 
     # 应用于forest
-    make_forest_type_check(forest, True, 'All')
     for node in false_set:
         node.gradient_checkpoint = False
         node.model.gradient_checkpoint = False
@@ -345,6 +354,51 @@ def knapsack_greedy_01(weights, values, W):
         # 0/1背包问题不能选部分物品，所以不考虑 else 分支
 
     return max_value, best_combination  # 返回最大价值和最优组合
+
+def make_node_type_check1(node:Union[Pretrain.CheckModelTree, Pretrain.CheckModelNode],
+                         _gradient_checkpoint: bool, _model_type:Union[Type, Tuple[Type, ...], str] = 'All'):
+    """ 本节点及其子树的type型操作 """
+    if isinstance(node, Pretrain.CheckModelTree):
+        son_list = node.SonNodeList
+        for SonNode in son_list:
+            make_node_type_check1(SonNode, _gradient_checkpoint, _model_type)
+    elif isinstance(node, Pretrain.CheckModelNode):
+        if _model_type == 'All':
+            node.gradient_checkpoint = _gradient_checkpoint
+            node.model.gradient_checkpoint = _gradient_checkpoint
+            son_list = node.SonNodeList
+            for SonNode in son_list:
+                make_node_type_check1(SonNode, _gradient_checkpoint, _model_type)
+        else:
+            if isinstance(node.model, _model_type):
+                node.gradient_checkpoint = _gradient_checkpoint
+                node.model.gradient_checkpoint = _gradient_checkpoint
+            else:
+                node.gradient_checkpoint = not _gradient_checkpoint
+                node.model.gradient_checkpoint = _gradient_checkpoint
+            son_list = node.SonNodeList
+            for SonNode in son_list:
+                make_node_type_check1(SonNode, _gradient_checkpoint, _model_type)
+    else:
+        assert 1, "node type error"
+
+def normalize_forest(forest: Pretrain.CheckForest):
+    """ 规范化函数,对节点子树全部置为False """
+    tree_list = forest.check_forest
+    for tree_root in tree_list:
+        SonNodes = tree_root.SonNodeList
+        for son_node in SonNodes:
+            def _is_node_true(node: Pretrain.CheckModelNode):
+                if isinstance(node, Pretrain.CheckModelNode) and node.model.gradient_checkpoint:
+                    make_node_type_check1(node, False,'All')
+                    node.gradient_checkpoint = True
+                    node.model.gradient_checkpoint = True
+                else:
+                    sons_list = node.SonNodeList
+                    for son in sons_list:
+                        _is_node_true(son)
+            _is_node_true(son_node)
+
 
 
 

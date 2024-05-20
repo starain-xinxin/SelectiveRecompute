@@ -13,6 +13,8 @@ class MemoryMonitor:
         self.is_snapshot = is_snapshot
 
     def start(self, max_entries=100000):
+        if not torch.cuda.is_initialized():
+            torch.cuda.init()
         self.is_start = True
         if self.is_snapshot:
             torch.cuda.memory._record_memory_history(max_entries=max_entries, device=self.device)
